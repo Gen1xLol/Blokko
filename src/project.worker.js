@@ -67,7 +67,7 @@ self.onmessage = async (event) => {
               ...svgAsset,
               key: `${svgAsset.filename}#embedded-png-${embedded.index}`,
               name: `${svgAsset.name} - embedded PNG ${embedded.index + 1}`,
-              filename: `${svgAsset.filename} (embedded PNG ${embedded.index + 1})`,
+              filename: svgAsset.filename,
               sourceFilename: svgAsset.filename,
               embeddedIndex: embedded.index,
               isEmbedded: true,
