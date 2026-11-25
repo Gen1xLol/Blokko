@@ -63,12 +63,12 @@ export async function convertWav(bytes, expectedSamples = 0, bitrate = 192) {
 export function decodeWav(bytes) {
   const view = new DataView(bytes);
   if (view.byteLength < 12 || readFourCC(view, 8) !== "WAVE")
-    throw new Error("this sound is not a supported WAV file");
+    throw new Error("this sound is not a supported WAV file (no WAVE header)");
   const container = readFourCC(view, 0);
   const bigEndian = container === "RIFX";
   const rf64 = container === "RF64";
   if (container !== "RIFF" && !bigEndian && !rf64)
-    throw new Error("this sound is not a supported WAV file");
+    throw new Error("this sound is not a supported WAV file (no RIFF/RIFX/RF64 header)");
   let format = null;
   const dataChunks = [];
   let rf64DataLength = null;
