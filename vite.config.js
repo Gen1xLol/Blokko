@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
+  base: '/Blokko/',
   plugins: [svelte()],
-  worker: { format: "es" },
+  worker: { format: 'es' },
 })
