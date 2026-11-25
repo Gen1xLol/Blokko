@@ -2,7 +2,12 @@ import lameUrl from "lamejs/lame.all.js?url";
 
 let encoderPromise;
 
-export async function convertWav(bytes, expectedSamples = 0, bitrate = 192) {
+export async function convertWav(
+  bytes,
+  expectedSamples = 0,
+  bitrate = 192,
+  fallbackSampleRate = 0,
+) {
   const AudioContextType = window.AudioContext || window.webkitAudioContext;
   const OfflineAudioContextType =
     window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -11,7 +16,7 @@ export async function convertWav(bytes, expectedSamples = 0, bitrate = 192) {
   const context = new AudioContextType();
   try {
     const sampleRate = 44100;
-    const decoded = decodeWav(bytes);
+    const decoded = decodeWav(bytes, expectedSamples, fallbackSampleRate);
     const decodedCount =
       expectedSamples > 0
         ? Math.min(expectedSamples, decoded.sampleCount)
@@ -60,15 +65,21 @@ export async function convertWav(bytes, expectedSamples = 0, bitrate = 192) {
   }
 }
 
-export function decodeWav(bytes) {
+export function decodeWav(bytes, expectedSamples = 0, fallbackSampleRate = 0) {
   const view = new DataView(bytes);
-  if (view.byteLength < 12 || readFourCC(view, 8) !== "WAVE")
-    throw new Error("this sound is not a supported WAV file (no WAVE header)");
+  if (view.byteLength < 12 || readFourCC(view, 8) !== "WAVE") {
+    const container = view.byteLength >= 4 ? readFourCC(view, 0) : "";
+    if (container === "RIFF" || container === "RIFX" || container === "RF64")
+      throw new Error("this WAV file has no WAVE chunk header");
+    return decodeHeaderlessPcm(bytes, expectedSamples, fallbackSampleRate);
+  }
   const container = readFourCC(view, 0);
   const bigEndian = container === "RIFX";
   const rf64 = container === "RF64";
   if (container !== "RIFF" && !bigEndian && !rf64)
-    throw new Error("this sound is not a supported WAV file (no RIFF/RIFX/RF64 header)");
+    throw new Error(
+      "this sound is not a supported WAV file (no RIFF/RIFX/RF64 header)",
+    );
   let format = null;
   const dataChunks = [];
   let rf64DataLength = null;
@@ -149,6 +160,27 @@ export function decodeWav(bytes) {
   throw new Error(
     `this WAV uses audio encoding ${format.code}, which Blokko cannot convert yet :(`,
   );
+}
+
+function decodeHeaderlessPcm(bytes, expectedSamples, sampleRate) {
+  if (
+    !Number.isSafeInteger(expectedSamples) ||
+    expectedSamples <= 0 ||
+    !Number.isFinite(sampleRate) ||
+    sampleRate <= 0
+  )
+    throw new Error(
+      "this sound has no WAV header, and its project is missing the sample count or sample rate needed to decode raw audio",
+    );
+  if (bytes.byteLength !== expectedSamples * 2)
+    throw new Error(
+      "this headerless sound is not mono 16-bit PCM with the sample count stored in the project",
+    );
+  const view = new DataView(bytes);
+  const samples = new Float32Array(expectedSamples);
+  for (let index = 0; index < expectedSamples; index++)
+    samples[index] = view.getInt16(index * 2, true) / 32768;
+  return { channels: [samples], sampleCount: expectedSamples, sampleRate };
 }
 
 function readFourCC(view, offset) {

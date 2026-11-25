@@ -565,6 +565,7 @@
     conversionProgress = 0;
     conversionStatus = "Starting conversion...";
     const conversionId = Date.now();
+    let errorAssetNames = [...selectedAssets, ...selectedImages];
     let worker;
     try {
       const audioAssets = selectedAssets.map((key) =>
@@ -573,6 +574,10 @@
       const imageAssets = selectedImages.map((key) =>
         visibleImageAssets.find((asset) => asset.key === key),
       );
+      errorAssetNames = [
+        ...audioAssets.map((asset, index) => asset?.name || selectedAssets[index]),
+        ...imageAssets.map((asset, index) => asset?.name || selectedImages[index]),
+      ];
       if (audioAssets.some((asset) => !asset) || imageAssets.some((asset) => !asset))
         throw new Error("a selected asset is no longer available");
       const result = await new Promise((resolve, reject) => {
@@ -611,7 +616,16 @@
         assets: changes,
       };
     } catch (exception) {
-      error = exception.message || "something went wrong while converting the selected assets";
+      const message =
+        exception.message ||
+        "something went wrong while converting the selected assets";
+      const names = errorAssetNames.filter(Boolean);
+      const hasAssetName =
+        names.some((name) => message.endsWith(`(${name})`)) ||
+        message.endsWith(`(${names.join(", ")})`);
+      error = hasAssetName
+        ? message
+        : `${message} (${names.join(", ") || "selected assets"})`;
     } finally {
       worker?.terminate();
       if (conversionWorker === worker) conversionWorker = null;
