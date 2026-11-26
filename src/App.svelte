@@ -1336,6 +1336,8 @@
           <div class="conversion-footer">
             <span class="image-note md-typescale-body-medium">
               Transparent pixels are kept when optimizing PNGs, but not when converting to JPG.
+              JPG is only used when it comes out at least 10% smaller than the optimized PNG.
+              Otherwise, the PNG is kept.
             </span>
           </div>
         {:else}
@@ -1401,7 +1403,20 @@
             <md-list class="results-assets">
               {#each conversionResults.assets as item}
                 <md-list-item>
-                  <div slot="headline" class="ellipsis">{item.name}</div>
+                  <div
+                    slot="headline"
+                    style="display: flex; align-items: baseline; gap: 8px; min-width: 0"
+                  >
+                    <span class="ellipsis" style="min-width: 0">{item.name}</span>
+                    {#if item.note}
+                      <span
+                        class="md-typescale-body-small"
+                        style="flex: none; color: var(--md-sys-color-on-surface-variant)"
+                      >
+                        {item.note}
+                      </span>
+                    {/if}
+                  </div>
                   <strong
                     slot="trailing-supporting-text"
                     class="md-typescale-label-large"

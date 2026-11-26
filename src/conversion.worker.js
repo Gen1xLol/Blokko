@@ -2,9 +2,8 @@ import JSZip from "jszip";
 import lameScriptUrl from "lamejs/lame.all.js?url";
 import { decodeWav } from "./audio.js";
 import {
+  convertImage,
   getEmbeddedPngs,
-  optimisePng,
-  pngToJpg,
   replaceEmbeddedImage,
 } from "./images.js";
 
@@ -65,7 +64,8 @@ self.onmessage = async ({ data: request }) => {
           sound.sampleCount = output.sampleCount;
         }
       changes.push({
-        name: `${asset.name} (WAV to MP3)`,
+        name: asset.name,
+        note: "WAV to MP3",
         savings: getSavingsPercent(input.byteLength, output.bytes.size),
       });
       completed++;
@@ -97,14 +97,14 @@ self.onmessage = async ({ data: request }) => {
           throw new Error(
             `couldn't read embedded PNG ${asset.embeddedIndex + 1}`,
           );
-        const format =
-          imageFormats[asset.key] === "jpg" && asset.transparent === false
-            ? "jpg"
-            : "png";
-        const output =
-          format === "jpg"
-            ? await pngToJpg(embedded.bytes)
-            : await optimisePng(embedded.bytes);
+        const {
+          format,
+          bytes: output,
+          jpgRejected,
+        } = await convertImage(
+          embedded.bytes,
+          imageFormats[asset.key] === "jpg" && asset.transparent === false,
+        );
         svgText = replaceEmbeddedImage(
           svgText,
           asset.embeddedIndex,
@@ -112,7 +112,8 @@ self.onmessage = async ({ data: request }) => {
           output,
         );
         changes.push({
-          name: `${asset.name} (${format.toUpperCase()})`,
+          name: asset.name,
+          note: describeFormat(format, jpgRejected),
           savings: getSavingsPercent(
             embedded.bytes.byteLength,
             output.byteLength,
@@ -131,12 +132,14 @@ self.onmessage = async ({ data: request }) => {
       if (!archiveEntry)
         throw new Error("couldn't find this image in the project archive");
       const input = await archiveEntry.async("arraybuffer");
-      const format =
-        imageFormats[asset.key] === "jpg" && asset.transparent === false
-          ? "jpg"
-          : "png";
-      const output =
-        format === "jpg" ? await pngToJpg(input) : await optimisePng(input);
+      const {
+        format,
+        bytes: output,
+        jpgRejected,
+      } = await convertImage(
+        input,
+        imageFormats[asset.key] === "jpg" && asset.transparent === false,
+      );
       const newFilename =
         format === "jpg" ? `${asset.assetId}.jpg` : asset.filename;
       archive.file(newFilename, output);
@@ -150,7 +153,8 @@ self.onmessage = async ({ data: request }) => {
           costume.md5ext = newFilename;
         }
       changes.push({
-        name: `${asset.name} (${format.toUpperCase()})`,
+        name: asset.name,
+        note: describeFormat(format, jpgRejected),
         savings: getSavingsPercent(input.byteLength, output.byteLength),
       });
       completed++;
@@ -302,6 +306,10 @@ function toStereo(values) {
 function toInt16(sample) {
   const bounded = Math.max(-1, Math.min(1, sample));
   return Math.round(bounded < 0 ? bounded * 32768 : bounded * 32767);
+}
+
+function describeFormat(format, jpgRejected) {
+  return jpgRejected ? "PNG, JPG wouldn't save enough" : format.toUpperCase();
 }
 
 function getSavingsPercent(before, after) {

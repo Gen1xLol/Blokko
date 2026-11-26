@@ -1,12 +1,23 @@
 import { optimise } from "@jsquash/oxipng";
 import { init as initOxipng } from "@jsquash/oxipng/optimise";
 import oxipngWasmUrl from "@jsquash/oxipng/codec/pkg/squoosh_oxipng_bg.wasm?url";
+import encodeJpeg, { init as initJpeg } from "@jsquash/jpeg/encode";
+import jpegWasmUrl from "@jsquash/jpeg/codec/enc/mozjpeg_enc.wasm?url";
+
+const jpgQuality = 85;
+const minJpgSavings = 0.1;
 
 let oxipngReady;
+let jpegReady;
 
 async function ensureOxipng() {
   if (!oxipngReady) oxipngReady = initOxipng(oxipngWasmUrl);
   await oxipngReady;
+}
+
+async function ensureJpeg() {
+  if (!jpegReady) jpegReady = initJpeg(null, { locateFile: () => jpegWasmUrl });
+  await jpegReady;
 }
 
 export function getEmbeddedPngs(svgText) {
@@ -85,10 +96,20 @@ export async function inspectPng(bytes) {
 
 export async function optimisePng(bytes) {
   await ensureOxipng();
-  return optimise(bytes, { level: 3 });
+  const output = await optimise(bytes, { level: 3 });
+  return output.byteLength < bytes.byteLength ? output : bytes;
 }
 
-export async function pngToJpg(bytes, quality = 0.9) {
+export async function convertImage(bytes, wantsJpg) {
+  const png = await optimisePng(bytes);
+  if (!wantsJpg) return { format: "png", bytes: png, jpgRejected: false };
+  const jpg = await pngToJpg(bytes);
+  if (jpg.byteLength <= png.byteLength * (1 - minJpgSavings))
+    return { format: "jpg", bytes: jpg, jpgRejected: false };
+  return { format: "png", bytes: png, jpgRejected: true };
+}
+
+export async function pngToJpg(bytes, quality = jpgQuality) {
   const blob = new Blob([bytes], { type: "image/png" });
   let image;
   let url = "";
@@ -111,23 +132,17 @@ export async function pngToJpg(bytes, quality = 0.9) {
             width: image.width,
             height: image.height,
           });
-    const context = canvas.getContext("2d");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, image.width, image.height);
     context.drawImage(image, 0, 0);
-    const output = await new Promise((resolve, reject) => {
-      canvas.convertToBlob
-        ? canvas.convertToBlob({ type: "image/jpeg", quality }).then(resolve, reject)
-        : canvas.toBlob(
-            (result) =>
-              result
-                ? resolve(result)
-                : reject(new Error("couldn't convert this PNG to JPG")),
-            "image/jpeg",
-            quality,
-          );
+    const pixels = context.getImageData(0, 0, image.width, image.height);
+    await ensureJpeg();
+    return encodeJpeg(pixels, {
+      quality,
+      chroma_subsample: 1,
+      auto_subsample: false,
     });
-    return output.arrayBuffer();
   } finally {
     image?.close?.();
     if (url) URL.revokeObjectURL(url);
