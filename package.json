@@ -16,6 +16,7 @@
     "jszip": "^3.10.1",
     "lamejs": "^1.2.1",
     "m3-svelte": "^7.2.1",
+    "pmp-protobuf": "^1.9.0",
     "svelte": "^5.0.0"
   },
   "devDependencies": {

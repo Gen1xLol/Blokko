@@ -188,12 +188,41 @@ main > * {
   display: none;
 }
 
+.upload-panel md-divider {
+  width: min(100%, 38rem);
+  margin: 1.75rem auto;
+}
+
+.url-import {
+  display: grid;
+  gap: 1rem;
+  width: 100%;
+}
+
+.url-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.url-import md-outlined-text-field {
+  width: 100%;
+}
+
+.url-import-error {
+  color: var(--md-sys-color-error);
+}
+
 .top-app-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 1.25rem 2rem;
+}
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .app-name {

@@ -5,6 +5,8 @@
     lookUpExtensionMetadata,
   } from "./extensions.js";
   import { getStatDetail } from "./stat-details.js";
+  import JSZip from "jszip";
+  import { protobufToPMP } from "pmp-protobuf";
   // crime against svelte:
   import "@material/web/button/filled-button.js";
   import "@material/web/button/filled-tonal-button.js";
@@ -12,6 +14,7 @@
   import "@material/web/button/text-button.js";
   import "@material/web/checkbox/checkbox.js";
   import "@material/web/divider/divider.js";
+  import "@material/web/dialog/dialog.js";
   import "@material/web/icon/icon.js";
   import "@material/web/iconbutton/icon-button.js";
   import "@material/web/labs/card/filled-card.js";
@@ -27,7 +30,7 @@
   import "@material/web/textfield/outlined-text-field.js";
   import { styles as typescaleStyles } from "@material/web/typography/md-typescale-styles.js";
   import { ArcElement, Chart, Legend, PieController, Tooltip } from "chart.js";
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { quartOut } from "svelte/easing";
   import { Tween } from "svelte/motion";
 
@@ -44,11 +47,17 @@
     extensions: 0,
     media: 0,
   };
+  const urlsExamples = [
+    "https://scratch.mit.edu/projects/...",
+    "https://studio.penguinmod.com/#...",
+  ];
   let project = $state(null);
   const animatedStats = new Tween(
     { ...initialStats },
     { duration: 1500, easing: quartOut },
   );
+
+  // should probably re-do this later
   let originalUrl = $state("");
   let packagedUrl = $state("");
   let packagedName = $state("");
@@ -58,6 +67,13 @@
   let conversionResults = $state(null);
   let bitrate = $state(192);
   let loading = $state(false);
+  let importingUrl = $state(false);
+  let projectUrl = $state("");
+  let urlDialog = $state(null);
+  let animatedUrlPlaceholder = $state(urlsExamples[0]);
+  let urlPlaceholderAnimationId = 0;
+  let urlPlaceholderTimer;
+  let resolveUrlPlaceholderPause;
   let loadProgress = $state(0);
   let loadStatus = $state("");
   let converting = $state(false);
@@ -253,6 +269,7 @@
   });
 
   onDestroy(() => {
+    stopUrlPlaceholderAnimation();
     animatedStats.set(animatedStats.current, { duration: 0 });
     pieChart?.destroy();
     projectWorker?.terminate();
@@ -420,7 +437,174 @@
     await loadProject(file);
   }
 
-  async function loadProject(file) {
+  async function importProjectUrl() {
+    if (importingUrl || !projectUrl.trim()) return;
+    importingUrl = true;
+    error = "";
+    try {
+      const url = new URL(projectUrl.trim());
+      if (url.protocol !== "https:") throw new Error("use an HTTPS project URL");
+      const scratch = url.hostname === "scratch.mit.edu"
+        ? url.pathname.match(/^\/projects\/(\d+)\/?$/)?.[1]
+        : undefined;
+      const PMstudio = url.hostname === "studio.penguinmod.com" && /^\/(?:editor\.html)?\/?$/i.test(url.pathname)
+        ? url.hash.match(/^#(\d+)(?:[?&].*)?$/)?.[1]
+        : undefined;
+      const PMprojects = url.hostname === "projects.penguinmod.com"
+        ? url.pathname.match(/^\/(\d+)\/?$/)?.[1]
+        : undefined;
+      let file;
+      let sourcePlatform;
+      if (scratch) {
+        sourcePlatform = "Scratch";
+        file = await fetchScratchProject(scratch);
+      } else if (PMstudio || PMprojects) {
+        sourcePlatform = "PenguinMod";
+        file = await fetchPenguinModProject(PMstudio || PMprojects);
+      } else throw new Error("enter a valid Scratch or PenguinMod project URL");
+      const projectLoading = loadProject(file, sourcePlatform);
+      await tick();
+      void urlDialog?.close();
+      await projectLoading;
+    } catch (exception) {
+      error = exception.message || "couldn't download this project";
+    } finally {
+      importingUrl = false;
+    }
+  }
+
+  function openUrlDialog() {
+    error = "";
+    void urlDialog?.show();
+  }
+
+  function closeUrlDialog() {
+    if (!importingUrl) void urlDialog?.close();
+  }
+
+  function handleUrlDialogCancel(event) {
+    if (importingUrl) event.preventDefault();
+  }
+
+  function startUrlPlaceholderAnimation() {
+    stopUrlPlaceholderAnimation();
+    const animationId = urlPlaceholderAnimationId;
+    let exampleIndex = 0;
+    void animateUrlPlaceholder(animationId, exampleIndex);
+  }
+
+  function stopUrlPlaceholderAnimation() {
+    urlPlaceholderAnimationId++;
+    if (urlPlaceholderTimer) clearTimeout(urlPlaceholderTimer);
+    urlPlaceholderTimer = undefined;
+    resolveUrlPlaceholderPause?.(false);
+    resolveUrlPlaceholderPause = undefined;
+    animatedUrlPlaceholder = urlsExamples[0];
+  }
+
+  async function animateUrlPlaceholder(animationId, exampleIndex) {
+    const eraseCadence = [0, 3, -2, 4, -1, 2, -3];
+    const typeCadence = [0, 6, -2, 3, -1, 4, -3, 2];
+    while (animationId === urlPlaceholderAnimationId) {
+      if (!(await pauseForUrlPlaceholder(2600, animationId))) return;
+      const erasingLength = animatedUrlPlaceholder.length;
+      let erasedCount = 0;
+      while (animatedUrlPlaceholder.length) {
+        animatedUrlPlaceholder = animatedUrlPlaceholder.slice(0, -1);
+        erasedCount++;
+        const eraseProgress = 1 - animatedUrlPlaceholder.length / erasingLength;
+        const eraseDelay = Math.max(
+          8,
+          78 - Math.pow(eraseProgress, 1.5) * 70 + eraseCadence[erasedCount % eraseCadence.length],
+        );
+        if (!(await pauseForUrlPlaceholder(eraseDelay, animationId))) return;
+      }
+      exampleIndex = (exampleIndex + 1) % urlsExamples.length;
+      const nextExample = urlsExamples[exampleIndex];
+      for (let index = 0; index < nextExample.length; index++) {
+        const character = nextExample[index];
+        animatedUrlPlaceholder += character;
+        const separatorPause = character === ":" || character === "#"
+          ? 58
+          : character === "/"
+            ? 32
+            : character === "."
+              ? 26
+              : 0;
+        const typeDelay = Math.max(
+          12,
+          18 + Math.min(index * 0.4, 12) + typeCadence[index % typeCadence.length] + separatorPause,
+        );
+        if (!(await pauseForUrlPlaceholder(typeDelay, animationId))) return;
+      }
+    }
+  }
+
+  function pauseForUrlPlaceholder(duration, animationId) {
+    return new Promise((resolve) => {
+      resolveUrlPlaceholderPause = resolve;
+      urlPlaceholderTimer = setTimeout(() => {
+        urlPlaceholderTimer = undefined;
+        resolveUrlPlaceholderPause = undefined;
+        resolve(animationId === urlPlaceholderAnimationId);
+      }, duration);
+    });
+  }
+
+  async function fetchScratchProject(projectId) {
+    const metadataResponse = await fetch(`https://trampoline.turbowarp.org/api/projects/${projectId}`);
+    if (!metadataResponse.ok) throw new Error("couldn't find that Scratch project");
+    const metadata = await metadataResponse.json();
+    if (!metadata.project_token) throw new Error("Scratch did not provide a project token");
+    const projectResponse = await fetch(`https://projects.scratch.mit.edu/${projectId}?token=${encodeURIComponent(metadata.project_token)}`);
+    if (!projectResponse.ok) throw new Error("couldn't download the Scratch project data");
+    const projectText = await projectResponse.text();
+    const data = JSON.parse(projectText);
+    const assets = new Set();
+    for (const target of data.targets ?? [])
+      for (const item of [...(target.costumes ?? []), ...(target.sounds ?? [])])
+        if (item.md5ext) assets.add(item.md5ext);
+    const archive = new JSZip();
+    archive.file("project.json", projectText);
+    await Promise.all([...assets].map(async (asset) => {
+      const response = await fetch(`https://assets.scratch.mit.edu/internalapi/asset/${encodeURIComponent(asset)}/get/`);
+      if (!response.ok) throw new Error(`couldn't download Scratch asset ${asset}`);
+      archive.file(asset, await response.arrayBuffer());
+    }));
+    const blob = await archive.generateAsync({ type: "blob" });
+    return new File([blob], `${makeSafeProjectName(metadata.title, projectId)}.sb3`, { type: "application/zip" });
+  }
+
+  async function fetchPenguinModProject(projectId) {
+    const endpoint = "https://projects.penguinmod.com/api/v1/projects/getproject";
+    const [metadataResponse, protobufResponse, assetsResponse] = await Promise.all([
+      fetch(`${endpoint}?projectID=${encodeURIComponent(projectId)}&requestType=metadata`),
+      fetch(`${endpoint}?requestType=protobuf&projectID=${encodeURIComponent(projectId)}`),
+      fetch(`${endpoint}?requestType=assets&projectID=${encodeURIComponent(projectId)}`),
+    ]);
+    if (!metadataResponse.ok || !protobufResponse.ok || !assetsResponse.ok)
+      throw new Error("couldn't download the PenguinMod project");
+    const [metadata, protobuf, assets] = await Promise.all([
+      metadataResponse.json(),
+      protobufResponse.arrayBuffer(),
+      assetsResponse.json(),
+    ]);
+    const pmpAssets = assets.flatMap((asset) => {
+      if (!asset?.id || !Array.isArray(asset.buffer?.data)) return [];
+      return [{ id: asset.id, buffer: new Uint8Array(asset.buffer.data).buffer }];
+    });
+    const pmp = await protobufToPMP(new Uint8Array(protobuf), pmpAssets);
+    return new File([pmp], `${makeSafeProjectName(metadata.title, projectId)}.pmp`, { type: "application/zip" });
+  }
+
+  function makeSafeProjectName(title, fallback) {
+    return (typeof title === "string" ? title : "")
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+      .trim()
+      .replace(/[. ]+$/g, "") || fallback;
+  }
+
+  async function loadProject(file, sourcePlatform = "") {
     if (!file) return;
     const loadId = ++activeLoadId;
     cancelActiveLoad?.();
@@ -456,7 +640,12 @@
         worker.postMessage({ type: "load", file, id: loadId });
       });
       if (loadId !== activeLoadId) return;
-      const analyzed = { ...result.project, file, spriteColors: result.spriteColors };
+      const analyzed = {
+        ...result.project,
+        platform: sourcePlatform || (extension === "pmp" ? "PenguinMod" : result.project.platform),
+        file,
+        spriteColors: result.spriteColors,
+      };
       if (originalUrl) URL.revokeObjectURL(originalUrl);
       if (packagedUrl) URL.revokeObjectURL(packagedUrl);
       originalUrl = URL.createObjectURL(file);
@@ -652,6 +841,21 @@
   {#each Array.from(String(value)) as char}<span class:one={char === "1"}>{char}</span>{/each}
 {/snippet}
 
+{#snippet urlImporter()}
+  <form class="url-import" onsubmit={(event) => { event.preventDefault(); importProjectUrl(); }}>
+    <md-outlined-text-field
+      label="Project URL"
+      type="url"
+      placeholder={animatedUrlPlaceholder}
+      value={projectUrl}
+      oninput={(event) => (projectUrl = event.currentTarget.value)}
+      required
+    ></md-outlined-text-field>
+    {#if error}<p class="url-import-error" role="alert">{error}</p>{/if}
+    <span class="format-hint md-typescale-body-small">We support both Scratch and PenguinMod project URLs :D</span>
+  </form>
+{/snippet}
+
 <div class="app-shell">
   <main id="top">
     <header class="top-app-bar">
@@ -668,11 +872,36 @@
         </p>
       </div>
       {#if compact}
-        <md-filled-tonal-button onclick={() => fileInput?.click()}>
-          <md-icon slot="icon">refresh</md-icon>Choose another file
-        </md-filled-tonal-button>
+        <div class="project-actions">
+          <md-filled-tonal-button onclick={() => fileInput?.click()}>
+            <md-icon slot="icon">refresh</md-icon>Choose another file
+          </md-filled-tonal-button>
+          <md-outlined-button onclick={openUrlDialog}>
+            <md-icon slot="icon">link</md-icon>Open from URL
+          </md-outlined-button>
+        </div>
       {/if}
     </header>
+    <md-dialog
+      bind:this={urlDialog}
+      class="url-dialog"
+      onopened={startUrlPlaceholderAnimation}
+      onclosed={stopUrlPlaceholderAnimation}
+      oncancel={handleUrlDialogCancel}
+    >
+      <span slot="headline">Open project from URL</span>
+      <div slot="content">
+        {@render urlImporter()}
+      </div>
+      <div slot="actions">
+        <md-text-button type="button" disabled={importingUrl} onclick={closeUrlDialog}>Cancel</md-text-button>
+        <md-filled-button
+          type="button"
+          disabled={importingUrl || !projectUrl.trim()}
+          onclick={importProjectUrl}
+        ><md-icon slot="icon">arrow_forward</md-icon>{importingUrl ? "Downloading..." : "Open URL"}</md-filled-button>
+      </div>
+    </md-dialog>
 
     <input
       bind:this={fileInput}
@@ -718,6 +947,10 @@
             <span class="format-hint md-typescale-body-small">
               Supports .sb3 and .pmp files :)
             </span>
+            <md-divider></md-divider>
+            <md-outlined-button onclick={openUrlDialog}>
+              <md-icon slot="icon">link</md-icon>Open from URL
+            </md-outlined-button>
           {/if}
         </md-outlined-card>
       </section>
