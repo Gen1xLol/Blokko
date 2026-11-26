@@ -299,6 +299,12 @@ main > * {
   gap: 1rem 2rem;
 }
 
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .file-description {
   min-width: 0;
 }

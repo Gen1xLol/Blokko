@@ -422,6 +422,80 @@
     return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   }
 
+  function exportProjectStatsCsv() {
+    if (!project) return;
+    const rows = [["Section", "Metric", "Target", "Value", "Details"]];
+    const addRow = (section, metric, target = "", value = "", details = "") =>
+      rows.push([section, metric, target, value, details]);
+
+    addRow("Project", "Title", "", project.name);
+    addRow("Project", "Platform", "", project.platform);
+    addRow("Project", "File size", "", project.size, "bytes");
+    for (const stat of stats)
+      addRow("Summary", stat.label, "", stat.value, stat.detail);
+    addRow("At a glance", "Variables", "", project.variables);
+    addRow("At a glance", "Lists", "", project.lists);
+    addRow("At a glance", "Custom fonts", "", project.fonts);
+    addRow("At a glance", "Stage size", "", project.stageSize);
+
+    for (const category of project.categories)
+      addRow("Block category", category.label, "", category.value);
+    for (const extension of project.extensionStats)
+      addRow("Extension", extension.label, "", extension.value, "blocks used");
+
+    for (const target of project.targetStats) {
+      const targetType = target.isStage ? "Stage" : "Sprite";
+      for (const [metric, value] of [
+        ["Blocks", target.blocks],
+        ["Scripts", target.scripts],
+        ["Variables", target.variables],
+        ["Lists", target.lists],
+        ["Costumes", target.costumes],
+        ["Sounds", target.sounds],
+      ]) addRow(targetType, metric, target.name, value);
+      for (const [category, value] of target.categories)
+        addRow("Target block category", category, target.name, value);
+    }
+
+    for (const asset of project.audioAssets)
+      addRow(
+        "Audio asset",
+        asset.name,
+        asset.target,
+        asset.rate && asset.samples ? (asset.samples / asset.rate).toFixed(2) : "",
+        `${asset.filename}; ${asset.rate} Hz; ${asset.samples} samples; ${asset.available ? "available" : "missing"}`,
+      );
+    for (const asset of project.imageAssets)
+      addRow(
+        "Image asset",
+        asset.name,
+        asset.target,
+        asset.transparent === null ? "unknown transparency" : asset.transparent ? "transparent" : "opaque",
+        `${asset.filename}; ${asset.available ? "available" : "missing"}`,
+      );
+    for (const asset of project.svgAssets)
+      addRow(
+        "SVG asset",
+        asset.name,
+        asset.target,
+        "SVG",
+        `${asset.filename}; ${asset.available ? "available" : "missing"}`,
+      );
+
+    const csv = rows
+      .map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
+      .join("\r\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${makeSafeProjectName(project.name, "project")}-stats.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   function setError(message = "") {
     error = message;
   }
@@ -480,6 +554,18 @@
 
   function closeUrlDialog() {
     if (!importingUrl) void urlDialog?.close();
+  }
+
+  function handleMaterialButtonKeydown(event) {
+    if (
+      event.composedPath()[0] !== event.currentTarget ||
+      event.currentTarget.disabled ||
+      (event.key !== "Enter" && event.key !== " ") ||
+      event.repeat
+    )
+      return;
+    event.preventDefault();
+    event.currentTarget.click();
   }
 
   function handleUrlDialogCancel(event) {
@@ -873,10 +959,10 @@
       </div>
       {#if compact}
         <div class="project-actions">
-          <md-filled-tonal-button onclick={() => fileInput?.click()}>
+          <md-filled-tonal-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} onclick={() => fileInput?.click()}>
             <md-icon slot="icon">refresh</md-icon>Choose another file
           </md-filled-tonal-button>
-          <md-outlined-button onclick={openUrlDialog}>
+          <md-outlined-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} onclick={openUrlDialog}>
             <md-icon slot="icon">link</md-icon>Open from URL
           </md-outlined-button>
         </div>
@@ -894,8 +980,11 @@
         {@render urlImporter()}
       </div>
       <div slot="actions">
-        <md-text-button type="button" disabled={importingUrl} onclick={closeUrlDialog}>Cancel</md-text-button>
+        <md-text-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} type="button" disabled={importingUrl} onclick={closeUrlDialog}>Cancel</md-text-button>
         <md-filled-button
+          role="button"
+          tabindex="-1"
+          onkeydown={handleMaterialButtonKeydown}
           type="button"
           disabled={importingUrl || !projectUrl.trim()}
           onclick={importProjectUrl}
@@ -941,14 +1030,14 @@
             <p class="md-typescale-body-large">
               Choose a TurboWarp or PenguinMod project to inspect!
             </p>
-            <md-filled-button onclick={() => fileInput?.click()}>
+            <md-filled-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} onclick={() => fileInput?.click()}>
               <md-icon slot="icon">upload</md-icon>Choose project
             </md-filled-button>
             <span class="format-hint md-typescale-body-small">
               Supports .sb3 and .pmp files :)
             </span>
             <md-divider></md-divider>
-            <md-outlined-button onclick={openUrlDialog}>
+            <md-outlined-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} onclick={openUrlDialog}>
               <md-icon slot="icon">link</md-icon>Open from URL
             </md-outlined-button>
           {/if}
@@ -964,10 +1053,15 @@
             {formatBytes(project.size)}
           </p>
         </div>
-        <md-outlined-button href={originalUrl} download={project.filename}>
-          <md-icon slot="icon">download</md-icon>Download original
-          <span class="ext">.{project.extension}</span>
-        </md-outlined-button>
+        <div class="file-actions">
+          <md-outlined-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} onclick={exportProjectStatsCsv}>
+            <md-icon slot="icon">table_view</md-icon>Export stats CSV
+          </md-outlined-button>
+          <md-outlined-button href={originalUrl} download={project.filename}>
+            <md-icon slot="icon">download</md-icon>Download original
+            <span class="ext">.{project.extension}</span>
+          </md-outlined-button>
+        </div>
       </section>
 
       <md-filled-card
@@ -1102,6 +1196,9 @@
             {#if search}
               <md-icon-button
                 slot="trailing-icon"
+                role="button"
+                tabindex="-1"
+                onkeydown={handleMaterialButtonKeydown}
                 aria-label="Clear filter"
                 onclick={() => (search = "")}
               >
@@ -1143,7 +1240,7 @@
         </div>
         {#if visibleAudioAssets.length}
           <div class="toolbar">
-            <md-text-button disabled={converting} onclick={selectAllAudio}>
+            <md-text-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} disabled={converting} onclick={selectAllAudio}>
               {selectedAssets.length ===
               visibleAudioAssets.filter((asset) => asset.available).length
                 ? "Clear selection"
@@ -1234,7 +1331,7 @@
         </div>
         {#if visibleImageAssets.length}
           <div class="toolbar">
-            <md-text-button disabled={converting} onclick={selectAllImages}>
+            <md-text-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} disabled={converting} onclick={selectAllImages}>
               {selectedImages.length ===
               visibleImageAssets.filter((asset) => asset.available).length
                 ? "Clear selection"
@@ -1363,6 +1460,9 @@
           </md-filled-button>
         {:else}
           <md-filled-button
+            role="button"
+            tabindex="-1"
+            onkeydown={handleMaterialButtonKeydown}
             disabled={!project.hasArchive ||
               (!selectedAssets.length && !selectedImages.length) ||
               converting}
@@ -1436,7 +1536,7 @@
       <div class="error-message md-typescale-body-medium" role="alert">
         <md-icon>error</md-icon>
         <span class="error-text">{error}</span>
-        <md-icon-button aria-label="Dismiss message" onclick={() => (error = "")}>
+        <md-icon-button role="button" tabindex="-1" onkeydown={handleMaterialButtonKeydown} aria-label="Dismiss message" onclick={() => (error = "")}>
           <md-icon>close</md-icon>
         </md-icon-button>
       </div>
