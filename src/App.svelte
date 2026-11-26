@@ -5,6 +5,7 @@
     lookUpExtensionMetadata,
   } from "./extensions.js";
   import { getStatDetail } from "./stat-details.js";
+  // crime against svelte:
   import "@material/web/button/filled-button.js";
   import "@material/web/button/filled-tonal-button.js";
   import "@material/web/button/outlined-button.js";
@@ -1048,11 +1049,20 @@
                     <td class="asset-label">{asset.name}</td>
                     <td>{asset.target}</td>
                     <td>
-                      {asset.transparent === null
-                        ? "Checking..."
-                        : asset.transparent
-                          ? "Transparent"
-                          : "Opaque"}
+                      <div
+                        role="img"
+                        aria-label={asset.transparent === null
+                          ? "Checking transparency"
+                          : asset.transparent
+                            ? "Transparent"
+                            : "Opaque"}
+                      >
+                        <md-checkbox
+                          inert
+                          checked={Boolean(asset.transparent)}
+                          indeterminate={asset.transparent === null}
+                        ></md-checkbox>
+                      </div>
                     </td>
                     <td>
                       <md-outlined-select
