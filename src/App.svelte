@@ -184,12 +184,21 @@
     const canvas = pieCanvas;
     const items = chartData;
     const total = chartTotal;
-    if (!canvas) {
+    if (!canvas || !total) {
       pieChart?.destroy();
       pieChart = undefined;
       clearPieTooltip();
       return;
     }
+
+    const frame = requestAnimationFrame(() => {
+      if (!canvas.isConnected || canvas !== pieCanvas) return;
+      renderPieChart(canvas, items, total);
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+
+  function renderPieChart(canvas, items, total) {
     if (pieChart && pieChart.canvas !== canvas) {
       pieChart.destroy();
       pieChart = undefined;
@@ -266,7 +275,7 @@
       return `${formatNumber(value)} (${percent}%)`;
     };
     pieChart.update();
-  });
+  }
 
   onDestroy(() => {
     stopUrlPlaceholderAnimation();
@@ -1114,16 +1123,16 @@
           </md-tabs>
           <div class="chart" aria-label={`${activeChart} pie chart`}>
             <div class="chart-stage">
+              <div class="pie-chart-box" class:is-hidden={chartTotal === 0}>
+                <canvas
+                  bind:this={pieCanvas}
+                  class="pie-canvas"
+                  aria-label={`${activeChart}: ${chartData.map((item) => `${item.label} ${item.value}`).join(", ")}`}
+                >
+                  {activeChart} pie chart
+                </canvas>
+              </div>
               {#if chartTotal > 0}
-                <div class="pie-chart-box">
-                  <canvas
-                    bind:this={pieCanvas}
-                    class="pie-canvas"
-                    aria-label={`${activeChart}: ${chartData.map((item) => `${item.label} ${item.value}`).join(", ")}`}
-                  >
-                    {activeChart} pie chart
-                  </canvas>
-                </div>
                 <md-list class="legend">
                   {#each chartData as item}
                     <md-list-item title={`${item.label}: ${item.value}`}>

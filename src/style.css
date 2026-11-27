@@ -443,6 +443,10 @@ main > * {
   height: 13rem;
 }
 
+.pie-chart-box.is-hidden {
+  display: none;
+}
+
 .pie-canvas {
   display: block;
 }
