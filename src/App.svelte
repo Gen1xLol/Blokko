@@ -742,10 +742,8 @@
         spriteColors: result.spriteColors,
       };
       if (originalUrl) URL.revokeObjectURL(originalUrl);
-      if (packagedUrl) URL.revokeObjectURL(packagedUrl);
+      clearConvertedDownload();
       originalUrl = URL.createObjectURL(file);
-      packagedUrl = "";
-      packagedName = "";
       selectedAssets = [];
       selectedImages = [];
       imageFormats = {};
@@ -845,6 +843,7 @@
       converting
     )
       return;
+    const sourceProject = project;
     converting = true;
     error = "";
     conversionProgress = 0;
@@ -883,7 +882,7 @@
         worker.postMessage({
           type: "convert",
           id: conversionId,
-          file: project.file,
+          file: sourceProject.file,
           audioAssets: JSON.parse(JSON.stringify(audioAssets)),
           imageAssets: JSON.parse(JSON.stringify(imageAssets)),
           imageFormats: JSON.parse(JSON.stringify(imageFormats)),
@@ -891,12 +890,13 @@
         });
       });
       const { blob, changes } = result;
+      if (project !== sourceProject) return;
       if (packagedUrl) URL.revokeObjectURL(packagedUrl);
       packagedUrl = URL.createObjectURL(blob);
-      packagedName = `${project.name}-converted.${project.extension}`;
+      packagedName = `${sourceProject.name}-converted.${sourceProject.extension}`;
       conversionResults = {
-        overall: getSavingsPercent(project.size, blob.size),
-        before: project.size,
+        overall: getSavingsPercent(sourceProject.size, blob.size),
+        before: sourceProject.size,
         after: blob.size,
         assets: changes,
       };
